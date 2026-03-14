@@ -11,9 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
     rm -rf /var/lib/apt/lists/*
 
-# PyTorch 2.8 with CUDA 12.4
+# PyTorch 2.6 with CUDA 12.4 (latest available on PyPI for cu124)
 RUN pip install --no-cache-dir \
-    torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu124
+    torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 
 # SkyReels V3 dependencies (from their requirements.txt)
 RUN pip install --no-cache-dir \
@@ -35,9 +35,8 @@ RUN pip install --no-cache-dir \
     librosa \
     kornia \
     wget==3.2 \
-    torchao==0.10.0 \
-    flash_attn==2.7.4.post1 \
-    xfuser==0.4.3.post3
+    torchao \
+    xfuser
 
 # F5-TTS for voice cloning
 RUN pip install --no-cache-dir f5-tts
