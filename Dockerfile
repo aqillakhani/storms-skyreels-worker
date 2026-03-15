@@ -47,21 +47,7 @@ RUN pip uninstall -y torchcodec 2>/dev/null || true && \
     pip uninstall -y torchcodec 2>/dev/null || true
 
 # Patch torchcodec import so F5-TTS doesn't crash when it tries to import it
-RUN python -c "
-import importlib, pathlib, site
-# Find f5_tts package and patch any torchcodec imports
-for sp in site.getsitepackages():
-    for f in pathlib.Path(sp).rglob('*.py'):
-        try:
-            txt = f.read_text()
-            if 'torchcodec' in txt and 'import torchcodec' in txt:
-                print(f'Patching: {f}')
-                txt = txt.replace('import torchcodec', '# import torchcodec  # patched out')
-                txt = txt.replace('from torchcodec', '# from torchcodec  # patched out')
-                f.write_text(txt)
-        except: pass
-print('torchcodec patch complete')
-"
+RUN python -c "import pathlib,site;[f.write_text(f.read_text().replace('import torchcodec','# import torchcodec').replace('from torchcodec','# from torchcodec')) for sp in site.getsitepackages() for f in pathlib.Path(sp).rglob('*.py') if f.read_text().find('import torchcodec')>=0]" 2>/dev/null; echo "torchcodec patch done"
 
 # Clone SkyReels V3
 RUN git clone --depth 1 https://github.com/SkyworkAI/SkyReels-V3.git /opt/skyreels-v3
