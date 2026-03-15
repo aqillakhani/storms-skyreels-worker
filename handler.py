@@ -277,6 +277,9 @@ def handle_diagnostic(job_input, mode):
 # Disable triton JIT compilation that fails without libcuda at import time
 os.environ.setdefault("TRITON_DISABLE_AUTOTUNE", "1")
 os.environ.setdefault("XFORMERS_DISABLED", "1")
+# Disable HF Xet storage backend — it uses /tmp for intermediate files causing disk quota issues
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 
 print("=" * 60)
 print("STORMS SKYREELS V3 WORKER — STARTUP-SAFE")
