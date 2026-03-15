@@ -40,8 +40,9 @@ RUN pip install --no-cache-dir \
     torchao \
     xfuser
 
-# F5-TTS for voice cloning
-RUN pip install --no-cache-dir f5-tts
+# F5-TTS for voice cloning (then remove torchcodec — optional dep with PyTorch ABI issues)
+RUN pip install --no-cache-dir f5-tts && \
+    pip uninstall -y torchcodec 2>/dev/null || true
 
 # Clone SkyReels V3
 RUN git clone --depth 1 https://github.com/SkyworkAI/SkyReels-V3.git /opt/skyreels-v3
