@@ -258,7 +258,7 @@ def handle_diagnostic(job_input, mode):
             sys.path.insert(0, "/opt/skyreels-v3")
             from skyreels_v3.modules import download_model
             os.environ.setdefault("HF_HOME", os.path.join(MODEL_CACHE, "huggingface"))
-            model_path = download_model("Skywork/SkyReels-V3-TalkingAvatar")
+            model_path = download_model("Skywork/SkyReels-V3-A2V-19B")
             return {"status": "ok", "model_path": str(model_path)}
         except Exception as e:
             return {"status": "error", "detail": str(e)}

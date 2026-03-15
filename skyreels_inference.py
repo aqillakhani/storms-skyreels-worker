@@ -40,7 +40,7 @@ def ensure_skyreels_models() -> str:
     os.environ.setdefault("HF_HOME", os.path.join(model_cache, "huggingface"))
 
     logger.info("Ensuring SkyReels V3 TalkingAvatar model is downloaded...")
-    _model_path = download_model("Skywork/SkyReels-V3-TalkingAvatar")
+    _model_path = download_model("Skywork/SkyReels-V3-A2V-19B")
     logger.info(f"SkyReels V3 model ready at: {_model_path}")
     return _model_path
 
