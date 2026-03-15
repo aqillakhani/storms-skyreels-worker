@@ -278,7 +278,10 @@ print("=" * 60)
 
 # Set HF cache to network volume so models persist across cold starts
 os.environ.setdefault("HF_HOME", os.path.join(MODEL_CACHE, "huggingface"))
+os.environ.setdefault("HF_HUB_CACHE", os.path.join(MODEL_CACHE, "huggingface", "hub"))
+os.environ.setdefault("TMPDIR", "/runpod-volume/tmp")
 os.makedirs(MODEL_CACHE, exist_ok=True)
+os.makedirs("/runpod-volume/tmp", exist_ok=True)
 
 # Create voice assets directory
 os.makedirs(str(DEFAULT_REF_AUDIO.parent), exist_ok=True)

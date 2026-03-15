@@ -59,6 +59,9 @@ ENV PYTHONPATH="/opt/skyreels-v3:${PYTHONPATH}"
 # Set model cache to network volume (will be mounted at runtime)
 ENV MODEL_CACHE="/runpod-volume/models"
 ENV HF_HOME="/runpod-volume/models/huggingface"
+ENV HF_HUB_CACHE="/runpod-volume/models/huggingface/hub"
+ENV TMPDIR="/runpod-volume/tmp"
+# HF_TOKEN should be set as an env var in the RunPod endpoint config
 
 # Copy worker files
 COPY handler.py .
