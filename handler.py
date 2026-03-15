@@ -270,6 +270,10 @@ def handle_diagnostic(job_input, mode):
 # Startup — MINIMAL, no heavy imports
 # ═══════════════════════════════════════════════════════════════
 
+# Disable triton JIT compilation that fails without libcuda at import time
+os.environ.setdefault("TRITON_DISABLE_AUTOTUNE", "1")
+os.environ.setdefault("XFORMERS_DISABLED", "1")
+
 print("=" * 60)
 print("STORMS SKYREELS V3 WORKER — STARTUP-SAFE")
 print(f"Python: {sys.version}")
