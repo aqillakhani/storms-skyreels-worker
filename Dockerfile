@@ -49,12 +49,9 @@ RUN pip uninstall -y torchcodec 2>/dev/null || true && \
     pip install --no-cache-dir f5-tts && \
     pip uninstall -y torchcodec 2>/dev/null || true
 
-# Ensure libcuda.so is findable for triton JIT compilation
-# On RunPod, the NVIDIA driver provides libcuda.so at runtime via nvidia-container-toolkit
-# but we need a stub for import-time compilation
-RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 2>/dev/null || true && \
-    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so 2>/dev/null || true
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs:/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+# Remove triton — its JIT compilation fails without runtime libcuda.so
+# SkyReels V3 doesn't need triton for inference
+RUN pip uninstall -y triton 2>/dev/null || true
 
 # Create a dummy torchcodec module so any "import torchcodec" won't crash
 RUN python -c "import site; p=site.getsitepackages()[0]+'/torchcodec'; __import__('os').makedirs(p,exist_ok=True); open(p+'/__init__.py','w').write('# stub\n')"
