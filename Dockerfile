@@ -55,17 +55,8 @@ RUN pip uninstall -y torchcodec 2>/dev/null || true && \
 RUN pip uninstall -y triton 2>/dev/null || true
 
 # Create stub modules for torchcodec and torchao (avoid import crashes)
-# torchao is imported unconditionally by SkyReels V3 but only used for low_vram quantization
-RUN python -c "\
-import site, os;\
-sp=site.getsitepackages()[0];\
-for mod in ['torchcodec','torchao']:\
-    p=os.path.join(sp,mod);\
-    os.makedirs(p,exist_ok=True);\
-    open(os.path.join(p,'__init__.py'),'w').write('# stub\n');\
-os.makedirs(os.path.join(sp,'torchao','quantization'),exist_ok=True);\
-open(os.path.join(sp,'torchao','quantization','__init__.py'),'w').write('def float8_weight_only(*a,**k): pass\ndef quantize_(*a,**k): pass\n');\
-print('stubs created')"
+COPY create_stubs.py /tmp/create_stubs.py
+RUN python /tmp/create_stubs.py && rm /tmp/create_stubs.py
 
 # Clone SkyReels V3
 RUN git clone --depth 1 https://github.com/SkyworkAI/SkyReels-V3.git /opt/skyreels-v3
