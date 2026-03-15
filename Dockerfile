@@ -2,11 +2,13 @@ FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
 WORKDIR /app
 
-# System deps
+# System deps + FFmpeg 6 (needed by torchcodec)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 python3.11-dev python3-pip \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxrender1 libxext6 \
-    ffmpeg git wget && \
+    git wget software-properties-common && \
+    add-apt-repository ppa:ubuntuhandbook1/ffmpeg6 -y && \
+    apt-get update && apt-get install -y --no-install-recommends ffmpeg && \
     ln -sf /usr/bin/python3.11 /usr/bin/python && \
     ln -sf /usr/bin/python3.11 /usr/bin/python3 && \
     rm -rf /var/lib/apt/lists/*
