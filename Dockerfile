@@ -17,11 +17,11 @@ RUN pip install --no-cache-dir \
     torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0 \
     --index-url https://download.pytorch.org/whl/cu124
 
-# Core dependencies
+# Core dependencies (torchao pinned to 0.7.0 for torch 2.6 compat)
 RUN pip install --no-cache-dir \
     runpod==1.7.0 \
     diffusers==0.34.0 \
-    "transformers>=4.53.0,<5.0.0" \
+    transformers==4.53.2 \
     tokenizers==0.21.4 \
     accelerate==1.8.1 \
     huggingface_hub>=0.26.0 \
@@ -38,8 +38,11 @@ RUN pip install --no-cache-dir \
     kornia \
     wget==3.2 \
     sentencepiece \
-    torchao \
+    torchao==0.7.0 \
     xfuser
+
+# Verify diffusers.models.modeling_utils imports correctly
+RUN python -c "from diffusers.models.modeling_utils import ModelMixin; print('diffusers ModelMixin OK')"
 
 # F5-TTS for voice cloning
 # Remove torchcodec BEFORE and AFTER install to prevent ABI mismatch crashes
