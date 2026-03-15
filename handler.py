@@ -255,13 +255,17 @@ def handle_diagnostic(job_input, mode):
     if mode == "setup_models":
         try:
             import torch
-            sys.path.insert(0, "/opt/skyreels-v3")
-            from skyreels_v3.modules import download_model
-            os.environ.setdefault("HF_HOME", os.path.join(MODEL_CACHE, "huggingface"))
-            model_path = download_model("Skywork/SkyReels-V3-A2V-19B")
-            return {"status": "ok", "model_path": str(model_path)}
+            from huggingface_hub import snapshot_download
+            cache_dir = os.path.join(MODEL_CACHE, "huggingface", "hub")
+            os.makedirs(cache_dir, exist_ok=True)
+            model_path = snapshot_download(
+                repo_id="Skywork/SkyReels-V3-A2V-19B",
+                cache_dir=cache_dir,
+            )
+            return {"status": "ok", "model_path": str(model_path), "cache_dir": cache_dir}
         except Exception as e:
-            return {"status": "error", "detail": str(e)}
+            import traceback
+            return {"status": "error", "detail": str(e), "traceback": traceback.format_exc()[-2000:]}
 
     return {"status": "ok", "message": f"Unknown mode: {mode}"}
 
