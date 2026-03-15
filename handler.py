@@ -212,7 +212,7 @@ def handle_diagnostic(job_input, mode):
                 "status": "ok",
                 "cuda": torch.cuda.is_available(),
                 "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
-                "vram_gb": round(torch.cuda.get_device_properties(0).total_mem / (1024**3), 1) if torch.cuda.is_available() else 0,
+                "vram_gb": round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1) if torch.cuda.is_available() else 0,
             }
         except Exception as e:
             return {"status": "error", "detail": str(e)}
