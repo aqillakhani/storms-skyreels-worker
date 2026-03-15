@@ -38,10 +38,9 @@ RUN pip install --no-cache-dir \
     kornia \
     wget==3.2 \
     sentencepiece \
-    torchao==0.7.0 \
     xfuser
 
-# Verify diffusers.models.modeling_utils imports correctly
+# Verify diffusers deep imports work (no torchao needed)
 RUN python -c "from diffusers.models.modeling_utils import ModelMixin; print('diffusers ModelMixin OK')"
 
 # F5-TTS for voice cloning

@@ -54,7 +54,7 @@ def _load_pipeline():
 
     model_path = ensure_skyreels_models()
 
-    logger.info("Loading SkyReels V3 TalkingAvatarPipeline (low_vram mode)...")
+    logger.info("Loading SkyReels V3 TalkingAvatarPipeline (offload mode)...")
     config = WAN_CONFIGS["talking-avatar-19B"]
 
     _skyreels_pipe = TalkingAvatarPipeline(
@@ -63,8 +63,8 @@ def _load_pipeline():
         device_id=0,
         rank=0,
         use_usp=False,
-        offload=False,
-        low_vram=True,
+        offload=True,
+        low_vram=False,
     )
 
     logger.info("SkyReels V3 pipeline loaded")
