@@ -40,7 +40,14 @@ def ensure_skyreels_models() -> str:
     os.environ.setdefault("HF_HOME", os.path.join(model_cache, "huggingface"))
 
     logger.info("Ensuring SkyReels V3 TalkingAvatar model is downloaded...")
-    _model_path = download_model("Skywork/SkyReels-V3-A2V-19B")
+    # Use explicit cache_dir to ensure download goes to network volume
+    from huggingface_hub import snapshot_download
+    cache_dir = os.path.join(model_cache, "huggingface", "hub")
+    os.makedirs(cache_dir, exist_ok=True)
+    _model_path = snapshot_download(
+        repo_id="Skywork/SkyReels-V3-A2V-19B",
+        cache_dir=cache_dir,
+    )
     logger.info(f"SkyReels V3 model ready at: {_model_path}")
     return _model_path
 

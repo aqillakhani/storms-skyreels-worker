@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir \
     kornia \
     wget==3.2 \
     sentencepiece \
+    av \
     xfuser
 
 # Verify diffusers deep imports work (no torchao needed)
