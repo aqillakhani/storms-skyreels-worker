@@ -2,6 +2,9 @@
 Storms SkyReels V3 Worker — Talking Avatar Pipeline
 F5-TTS voice cloning + SkyReels V3 TalkingAvatar
 
+STARTUP-SAFE: No heavy imports at module level. All ML imports are deferred
+to job time so the worker boots fast and doesn't crash/timeout on init.
+
 Input contract:
   - script: str (required)
   - pipeline: "skyreels" (only mode)
@@ -23,8 +26,6 @@ import logging
 import tempfile
 import subprocess
 import time
-import torch
-import soundfile as sf
 import requests
 from pathlib import Path
 
@@ -35,6 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger("storms-skyreels")
 
 # ── Paths ──
+MODEL_CACHE = os.environ.get("MODEL_CACHE", "/runpod-volume/models")
 DEFAULT_REF_AUDIO = Path("/runpod-volume/assets/voice/ashley_ref.wav")
 DEFAULT_REF_TEXT_PATH = Path("/runpod-volume/assets/voice/ashley_ref.txt")
 REF_IMAGE = "/app/ashley_reference.png"
@@ -80,7 +82,7 @@ def handler(event):
     """RunPod serverless handler for SkyReels V3 talking avatar."""
     job_input = event.get("input", {})
 
-    # Diagnostic modes
+    # Diagnostic modes (no heavy imports needed)
     mode = job_input.get("mode")
     if mode:
         return handle_diagnostic(job_input, mode)
@@ -106,7 +108,7 @@ def handler(event):
             else:
                 return {"error": "No voice reference audio available"}
 
-            # ── 2. TTS (F5-TTS) ──
+            # ── 2. TTS (F5-TTS) — lazy import ──
             logger.info(f"Generating TTS (F5-TTS) for {len(script)} chars...")
             from f5_tts_wrapper import generate_tts_f5
             ref_text = ""
@@ -115,13 +117,15 @@ def handler(event):
             audio_path = os.path.join(work_dir, "tts_output.wav")
             generate_tts_f5(script, ref_audio, audio_path, ref_text=ref_text)
 
+            import torch
+            import soundfile as sf
             audio_data, sample_rate = sf.read(audio_path)
             duration_ms = int(len(audio_data) / sample_rate * 1000)
             logger.info(f"TTS audio: {duration_ms}ms @ {sample_rate}Hz")
 
             torch.cuda.empty_cache()
 
-            # ── 3. SkyReels V3 video generation ──
+            # ── 3. SkyReels V3 video generation — lazy import ──
             from skyreels_inference import generate_skyreels_video
 
             logger.info("Generating talking avatar video (SkyReels V3)...")
@@ -198,21 +202,64 @@ def handle_diagnostic(job_input, mode):
             "status": "ok",
             "message": "SkyReels worker alive!",
             "python": sys.version,
+            "cuda_visible": os.environ.get("CUDA_VISIBLE_DEVICES", "not set"),
         }
 
     if mode == "check_gpu":
-        return {
-            "status": "ok",
-            "cuda": torch.cuda.is_available(),
-            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
-            "vram_gb": round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1) if torch.cuda.is_available() else 0,
+        try:
+            import torch
+            return {
+                "status": "ok",
+                "cuda": torch.cuda.is_available(),
+                "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
+                "vram_gb": round(torch.cuda.get_device_properties(0).total_mem / (1024**3), 1) if torch.cuda.is_available() else 0,
+            }
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    if mode == "check_imports":
+        results = {}
+        for mod_name in ["torch", "diffusers", "transformers", "f5_tts", "soundfile", "imageio"]:
+            try:
+                __import__(mod_name)
+                results[mod_name] = "ok"
+            except Exception as e:
+                results[mod_name] = f"FAIL: {e}"
+        # Check SkyReels V3 separately (needs sys.path)
+        try:
+            sys.path.insert(0, "/opt/skyreels-v3")
+            from skyreels_v3.configs import WAN_CONFIGS
+            results["skyreels_v3"] = "ok"
+        except Exception as e:
+            results["skyreels_v3"] = f"FAIL: {e}"
+        return {"status": "ok", "imports": results}
+
+    if mode == "check_disk":
+        import shutil
+        paths = {
+            "/": None,
+            "/runpod-volume": None,
+            "/app": None,
         }
+        for p in paths:
+            try:
+                usage = shutil.disk_usage(p)
+                paths[p] = {
+                    "total_gb": round(usage.total / (1024**3), 1),
+                    "free_gb": round(usage.free / (1024**3), 1),
+                }
+            except Exception as e:
+                paths[p] = str(e)
+        return {"status": "ok", "disk": paths}
 
     if mode == "setup_models":
         try:
-            from skyreels_inference import ensure_skyreels_models
-            ensure_skyreels_models()
-            return {"status": "ok", "skyreels_v3": "ready"}
+            import torch
+            sys.path.insert(0, "/opt/skyreels-v3")
+            from skyreels_v3.modules import download_model
+            os.environ.setdefault("HF_HOME", os.path.join(MODEL_CACHE, "huggingface"))
+            model_path = download_model("Skywork/SkyReels-V3-TalkingAvatar")
+            return {"status": "ok", "model_path": str(model_path)}
         except Exception as e:
             return {"status": "error", "detail": str(e)}
 
@@ -220,25 +267,18 @@ def handle_diagnostic(job_input, mode):
 
 
 # ═══════════════════════════════════════════════════════════════
-# Startup
+# Startup — MINIMAL, no heavy imports
 # ═══════════════════════════════════════════════════════════════
 
 print("=" * 60)
-print("STORMS SKYREELS V3 WORKER")
+print("STORMS SKYREELS V3 WORKER — STARTUP-SAFE")
 print(f"Python: {sys.version}")
-print(f"CUDA available: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    print(f"VRAM: {vram:.1f} GB")
+print(f"MODEL_CACHE: {MODEL_CACHE}")
 print("=" * 60)
 
-# Pre-download models on startup
-try:
-    from skyreels_inference import ensure_skyreels_models
-    ensure_skyreels_models()
-except Exception as e:
-    logger.warning(f"SkyReels V3 model setup skipped: {e}")
+# Set HF cache to network volume so models persist across cold starts
+os.environ.setdefault("HF_HOME", os.path.join(MODEL_CACHE, "huggingface"))
+os.makedirs(MODEL_CACHE, exist_ok=True)
 
 # Create voice assets directory
 os.makedirs(str(DEFAULT_REF_AUDIO.parent), exist_ok=True)

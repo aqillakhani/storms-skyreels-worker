@@ -35,6 +35,10 @@ def ensure_skyreels_models() -> str:
     if _model_path is not None:
         return _model_path
 
+    # Use network volume for model cache so models persist across cold starts
+    model_cache = os.environ.get("MODEL_CACHE", "/runpod-volume/models")
+    os.environ.setdefault("HF_HOME", os.path.join(model_cache, "huggingface"))
+
     logger.info("Ensuring SkyReels V3 TalkingAvatar model is downloaded...")
     _model_path = download_model("Skywork/SkyReels-V3-TalkingAvatar")
     logger.info(f"SkyReels V3 model ready at: {_model_path}")
