@@ -135,7 +135,7 @@ def handler(event):
                 ref_image_path=REF_IMAGE,
                 output_path=raw_video_path,
                 prompt="A beautiful young woman speaking to camera with confident expression and natural gestures.",
-                resolution="540P",
+                resolution="480P",
             )
             torch.cuda.empty_cache()
 
