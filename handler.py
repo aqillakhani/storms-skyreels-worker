@@ -135,7 +135,7 @@ def handler(event):
                 ref_image_path=REF_IMAGE,
                 output_path=raw_video_path,
                 prompt="A beautiful young woman speaking to camera with confident expression and natural gestures.",
-                resolution="480P",
+                resolution="480P",  # keep 480P for now until we confirm pipeline completes
             )
             torch.cuda.empty_cache()
 
@@ -306,14 +306,5 @@ os.makedirs("/runpod-volume/tmp", exist_ok=True)
 
 # Create voice assets directory
 os.makedirs(str(DEFAULT_REF_AUDIO.parent), exist_ok=True)
-
-# Pre-load SkyReels V3 pipeline at startup so requests don't spend 300s loading
-try:
-    print("Pre-loading SkyReels V3 pipeline...")
-    from skyreels_inference import _load_pipeline
-    _load_pipeline()
-    print("SkyReels V3 pipeline ready!")
-except Exception as e:
-    print(f"WARNING: Pipeline pre-load failed (will retry on first request): {e}")
 
 runpod.serverless.start({"handler": handler})
