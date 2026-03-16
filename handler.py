@@ -252,6 +252,15 @@ def handle_diagnostic(job_input, mode):
                 paths[p] = str(e)
         return {"status": "ok", "disk": paths}
 
+    if mode == "clear_models":
+        import shutil
+        cache_dir = os.path.join(MODEL_CACHE, "huggingface", "hub")
+        model_dir = os.path.join(cache_dir, "models--Skywork--SkyReels-V3-A2V-19B")
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir)
+            return {"status": "ok", "message": f"Cleared {model_dir}"}
+        return {"status": "ok", "message": "No cached model found"}
+
     if mode == "setup_models":
         try:
             import torch
@@ -261,6 +270,7 @@ def handle_diagnostic(job_input, mode):
             model_path = snapshot_download(
                 repo_id="Skywork/SkyReels-V3-A2V-19B",
                 cache_dir=cache_dir,
+                force_download=job_input.get("force", False),
             )
             return {"status": "ok", "model_path": str(model_path), "cache_dir": cache_dir}
         except Exception as e:
