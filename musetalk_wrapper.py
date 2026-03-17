@@ -147,6 +147,11 @@ def sync_lips(
         "--fps", "25",
     ]
 
+    # Build clean env — sanitize PYTHONHASHSEED which can cause crashes
+    sub_env = {**os.environ}
+    sub_env["PYTHONPATH"] = f"{MUSETALK_DIR}:{sub_env.get('PYTHONPATH', '')}"
+    sub_env.pop("PYTHONHASHSEED", None)  # Let Python use default random seed
+
     logger.info(f"MuseTalk cmd: {' '.join(cmd)}")
     proc = subprocess.run(
         cmd,
@@ -154,10 +159,7 @@ def sync_lips(
         text=True,
         timeout=600,
         cwd=MUSETALK_DIR,
-        env={
-            **os.environ,
-            "PYTHONPATH": f"{MUSETALK_DIR}:{os.environ.get('PYTHONPATH', '')}",
-        },
+        env=sub_env,
     )
 
     if proc.returncode != 0:
