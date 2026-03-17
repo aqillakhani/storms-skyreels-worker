@@ -33,14 +33,27 @@ def ensure_musetalk_models():
     logger.info("Downloading MuseTalk models...")
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    from huggingface_hub import snapshot_download, hf_hub_download
+    from huggingface_hub import snapshot_download
 
-    # Main MuseTalk v1.5 model
+    # Main MuseTalk models (v1 config + v1.5 weights) from TMElyralab/MuseTalk
     snapshot_download(
-        repo_id="TMElyralab/MuseTalkV2",
-        local_dir=str(models_dir / "musetalk"),
+        repo_id="TMElyralab/MuseTalk",
+        local_dir=str(models_dir),
         local_dir_use_symlinks=False,
-        allow_patterns=["musetalkV15/*"],
+    )
+
+    # SD VAE for latent decoding
+    snapshot_download(
+        repo_id="stabilityai/sd-vae-ft-mse",
+        local_dir=str(models_dir / "sd-vae-ft-mse"),
+        local_dir_use_symlinks=False,
+    )
+
+    # Whisper tiny for audio feature extraction
+    snapshot_download(
+        repo_id="openai/whisper-tiny",
+        local_dir=str(models_dir / "whisper"),
+        local_dir_use_symlinks=False,
     )
 
     # DWPose model for face landmark detection
@@ -55,20 +68,6 @@ def ensure_musetalk_models():
         repo_id="jonathandinu/face-parsing",
         local_dir=str(models_dir / "face-parse-bisenet"),
         local_dir_use_symlinks=False,
-    )
-
-    # SD VAE for latent decoding
-    snapshot_download(
-        repo_id="stabilityai/sd-vae-ft-mse",
-        local_dir=str(models_dir / "sd-vae-ft-mse"),
-        local_dir_use_symlinks=False,
-    )
-
-    # Whisper tiny for audio feature extraction
-    hf_hub_download(
-        repo_id="openai/whisper-tiny",
-        filename="model.safetensors",
-        local_dir=str(models_dir / "whisper"),
     )
 
     marker.touch()
@@ -117,18 +116,35 @@ def sync_lips(
 
     _load_musetalk()
 
-    # MuseTalk inference via its CLI — most reliable integration path
-    output_dir = str(Path(output_path).parent)
-    result_name = Path(output_path).stem
+    # MuseTalk inference via scripts/inference.py CLI
+    result_dir = str(Path(output_path).parent / "musetalk_out")
+    os.makedirs(result_dir, exist_ok=True)
+    output_vid_name = Path(output_path).name
+
+    # Build inference config YAML for MuseTalk
+    import yaml
+    inference_cfg = {
+        "task_0": {
+            "video_path": video_path,
+            "audio_path": audio_path,
+        }
+    }
+    cfg_path = os.path.join(result_dir, "inference_cfg.yaml")
+    with open(cfg_path, "w") as f:
+        yaml.dump(inference_cfg, f)
 
     cmd = [
-        sys.executable, "-m", "musetalk.inference",
-        "--video_path", video_path,
-        "--audio_path", audio_path,
-        "--output_dir", output_dir,
-        "--result_name", result_name,
-        "--model_dir", str(Path(MUSETALK_MODELS_DIR) / "musetalk" / "musetalkV15"),
+        sys.executable,
+        os.path.join(MUSETALK_DIR, "scripts", "inference.py"),
+        "--inference_config", cfg_path,
+        "--result_dir", result_dir,
+        "--output_vid_name", output_vid_name,
+        "--unet_model_path", str(Path(MUSETALK_MODELS_DIR) / "musetalkV15" / "unet.pth"),
+        "--unet_config", str(Path(MUSETALK_MODELS_DIR) / "musetalk" / "musetalk.json"),
+        "--whisper_dir", str(Path(MUSETALK_MODELS_DIR) / "whisper"),
         "--version", "v15",
+        "--use_float16",
+        "--fps", "25",
     ]
 
     logger.info(f"MuseTalk cmd: {' '.join(cmd)}")
@@ -148,39 +164,44 @@ def sync_lips(
         logger.error(f"MuseTalk stderr: {proc.stderr[-2000:]}")
         raise RuntimeError(f"MuseTalk failed (rc={proc.returncode}): {proc.stderr[-500:]}")
 
-    # Find the output file — MuseTalk may output with its own naming
-    output_dir_path = Path(output_dir)
-    candidates = [
-        output_dir_path / f"{result_name}.mp4",
-        output_dir_path / "result.mp4",
-    ]
-
-    # Also check for any recently created mp4
-    all_mp4s = sorted(
-        output_dir_path.glob("*.mp4"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
+    # Find the output file — MuseTalk outputs to result_dir/v15/
+    result_dir_path = Path(result_dir)
+    v15_dir = result_dir_path / "v15"
+    search_dirs = [v15_dir, result_dir_path]
 
     result_file = None
-    for candidate in candidates:
-        if candidate.exists():
-            result_file = candidate
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        # Check for our named output first
+        named = search_dir / output_vid_name
+        if named.exists():
+            result_file = named
             break
-
-    if result_file is None and all_mp4s:
-        # Use the most recently created mp4 that isn't the input
+        # Then check for any mp4
+        all_mp4s = sorted(
+            search_dir.glob("*.mp4"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
         for mp4 in all_mp4s:
             if str(mp4) != video_path:
                 result_file = mp4
                 break
+        if result_file:
+            break
 
     if result_file is None:
-        raise RuntimeError("MuseTalk produced no output video")
+        raise RuntimeError(
+            f"MuseTalk produced no output video. "
+            f"Searched: {[str(d) for d in search_dirs]}. "
+            f"stdout: {proc.stdout[-500:]}"
+        )
 
-    # Rename to expected output path if needed
+    # Move to expected output path
     if str(result_file) != output_path:
-        result_file.rename(output_path)
+        import shutil
+        shutil.move(str(result_file), output_path)
 
     # Ensure audio is muxed into the final output
     _ensure_audio_muxed(output_path, audio_path)
