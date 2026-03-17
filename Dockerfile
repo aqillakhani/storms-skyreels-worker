@@ -22,7 +22,6 @@ RUN pip install --no-cache-dir \
     fastapi==0.115.0 \
     uvicorn[standard]==0.30.6 \
     pydantic>=2.0.0 \
-    diffusers==0.34.0 \
     transformers==4.53.2 \
     tokenizers==0.21.4 \
     accelerate==1.8.1 \
@@ -37,14 +36,9 @@ RUN pip install --no-cache-dir \
     easydict \
     pyloudnorm \
     librosa \
-    kornia \
     wget==3.2 \
     sentencepiece \
-    av \
-    xfuser
-
-# Verify diffusers deep imports work
-RUN python -c "from diffusers.models.modeling_utils import ModelMixin; print('diffusers ModelMixin OK')"
+    av
 
 # F5-TTS for voice cloning
 # Remove torchcodec BEFORE and AFTER install to prevent ABI mismatch crashes
@@ -59,33 +53,29 @@ RUN pip uninstall -y triton 2>/dev/null || true
 COPY create_stubs.py /tmp/create_stubs.py
 RUN python /tmp/create_stubs.py && rm /tmp/create_stubs.py
 
-# Clone SkyReels V3
-RUN git clone --depth 1 https://github.com/SkyworkAI/SkyReels-V3.git /opt/skyreels-v3
-ENV PYTHONPATH="/opt/skyreels-v3:${PYTHONPATH}"
+# LivePortrait
+RUN git clone --depth 1 https://github.com/KwaiVGI/LivePortrait.git /opt/liveportrait
+RUN pip install --no-cache-dir -r /opt/liveportrait/requirements.txt
+
+# MuseTalk v1.5
+RUN git clone --depth 1 https://github.com/TMElyralab/MuseTalk.git /opt/musetalk
+RUN pip install --no-cache-dir -U openmim
+RUN mim install mmengine "mmcv>=2.0.1" "mmdet>=3.1.0" "mmpose>=1.1.0"
+RUN pip install --no-cache-dir -r /opt/musetalk/requirements.txt 2>/dev/null || true
 
 # Vast.ai uses /workspace as persistent storage
 ENV MODEL_CACHE="/workspace/models"
 ENV HF_HOME="/workspace/models/huggingface"
 ENV HF_HUB_CACHE="/workspace/models/huggingface/hub"
 ENV TMPDIR="/workspace/tmp"
-
-# InsightFace for face swap
-RUN pip install --no-cache-dir insightface onnxruntime-gpu
-
-# Wav2Lip
-RUN git clone --depth 1 https://github.com/Rudrabha/Wav2Lip.git /opt/Wav2Lip
-RUN pip install --no-cache-dir opencv-python-headless batch-face
+ENV PYTHONPATH="/opt/liveportrait:/opt/musetalk:${PYTHONPATH}"
 
 # Copy worker files
 COPY server.py .
-COPY skyreels_inference.py .
 COPY f5_tts_wrapper.py .
+COPY liveportrait_wrapper.py .
+COPY musetalk_wrapper.py .
 COPY ashley_reference.png .
-COPY flux_image_gen.py .
-COPY wan_i2v.py .
-COPY face_swap.py .
-COPY lip_sync.py .
-COPY shot_prompts.py .
 
 EXPOSE 8000
 

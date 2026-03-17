@@ -1,8 +1,8 @@
 """
-Storms SkyReels V3 — FastAPI server for Vast.ai GPU deployment.
+Storms LivePortrait + MuseTalk — FastAPI server for Vast.ai GPU deployment.
 
-Replaces RunPod serverless handler with a self-hosted HTTP server.
-Pre-loads models at startup (no timeout concern on dedicated GPU).
+3-stage pipeline: F5-TTS → LivePortrait → MuseTalk → FFmpeg
+Produces pixel-perfect talking head videos from Ashley's reference photo.
 
 Endpoints:
   POST /generate  — Submit a generation job (returns job_id)
@@ -30,7 +30,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-logger = logging.getLogger("storms-skyreels")
+logger = logging.getLogger("storms-liveportrait")
 
 # ── Env / Paths ──
 MODEL_CACHE = os.environ.get("MODEL_CACHE", "/workspace/models")
@@ -50,20 +50,18 @@ os.environ.setdefault("TMPDIR", "/workspace/tmp")
 os.makedirs(MODEL_CACHE, exist_ok=True)
 os.makedirs("/workspace/tmp", exist_ok=True)
 os.makedirs(str(DEFAULT_REF_AUDIO.parent), exist_ok=True)
+os.makedirs("/workspace/assets/driving", exist_ok=True)
 
 # ── Job Store (in-memory) ──
 jobs: dict[str, dict] = {}
 
-app = FastAPI(title="Storms SkyReels V3", version="1.0.0")
+app = FastAPI(title="Storms LivePortrait + MuseTalk", version="2.0.0")
 
 
 # ── Models ──
 
 class GenerateRequest(BaseModel):
     script: str
-    product_photo_url: Optional[str] = None
-    product_desc: Optional[str] = None
-    shot_type: str = "general_review"
     voice_ref_audio_url: Optional[str] = None
     presigned_audio_url: Optional[str] = None
     presigned_video_url: Optional[str] = None
@@ -112,17 +110,14 @@ def upload_to_presigned_url(file_path: str, presigned_url: str, content_type: st
 # ── Pipeline Worker ──
 
 def run_pipeline(job_id: str, job_input: dict):
-    """Run the full product review pipeline in a background thread.
+    """Run the 3-stage pipeline in a background thread.
 
-    Stages: F5-TTS → Flux (image) → Wan2.1 I2V (video) → InsightFace (face swap) → Wav2Lip (lip sync) → FFmpeg
+    Stages: F5-TTS → LivePortrait → MuseTalk → FFmpeg (encode)
     """
     jobs[job_id]["status"] = "RUNNING"
     jobs[job_id]["started_at"] = time.time()
 
     script = job_input["script"]
-    product_photo_url = job_input.get("product_photo_url")
-    product_desc = job_input.get("product_desc", "the product")
-    shot_type = job_input.get("shot_type", "general_review")
     voice_ref_url = job_input.get("voice_ref_audio_url")
     presigned_audio_url = job_input.get("presigned_audio_url")
     presigned_video_url = job_input.get("presigned_video_url")
@@ -131,8 +126,8 @@ def run_pipeline(job_id: str, job_input: dict):
         try:
             import torch
 
-            # ── Stage 1: F5-TTS voice clone ──
-            logger.info(f"[{job_id}] Stage 1/6: TTS ({len(script)} chars)")
+            # ── Stage 1/3: F5-TTS voice clone ──
+            logger.info(f"[{job_id}] Stage 1/3: TTS ({len(script)} chars)")
             if voice_ref_url:
                 ref_audio = os.path.join(work_dir, "ref_audio.wav")
                 download_file(voice_ref_url, ref_audio)
@@ -154,92 +149,32 @@ def run_pipeline(job_id: str, job_input: dict):
             logger.info(f"[{job_id}] TTS done: {duration_ms}ms")
             torch.cuda.empty_cache()
 
-            # ── Stage 2: Flux image generation (with face validation retry) ──
-            logger.info(f"[{job_id}] Stage 2/6: Flux image gen (shot={shot_type})")
-            from flux_image_gen import generate_product_image, unload_flux
-            from shot_prompts import get_image_prompt
-            from face_check import image_has_face
+            # ── Stage 2/3: LivePortrait head animation ──
+            logger.info(f"[{job_id}] Stage 2/3: LivePortrait animation")
+            from liveportrait_wrapper import animate_portrait, unload_liveportrait, _pick_driving_video
 
-            product_photo = os.path.join(work_dir, "product.jpg")
-            if product_photo_url:
-                download_file(product_photo_url, product_photo)
-            else:
-                # No product photo — use a placeholder prompt
-                product_photo = REF_IMAGE
+            driving_video = _pick_driving_video()
+            animated_path = os.path.join(work_dir, "animated.mp4")
+            animate_portrait(REF_IMAGE, driving_video, animated_path)
+            unload_liveportrait()
+            logger.info(f"[{job_id}] LivePortrait done")
 
-            image_prompt = get_image_prompt(shot_type, product_desc)
-            product_image_path = os.path.join(work_dir, "product_scene.png")
+            # ── Stage 3/3: MuseTalk lip sync ──
+            logger.info(f"[{job_id}] Stage 3/3: MuseTalk lip sync")
+            from musetalk_wrapper import sync_lips, unload_musetalk
 
-            max_image_attempts = 5
-            for attempt in range(max_image_attempts):
-                seed = 42 + attempt * 7
-                logger.info(f"[{job_id}] Image attempt {attempt + 1}/{max_image_attempts} (seed={seed})")
-                generate_product_image(
-                    product_photo_path=product_photo,
-                    prompt=image_prompt,
-                    output_path=product_image_path,
-                    seed=seed,
-                )
-                if image_has_face(product_image_path):
-                    logger.info(f"[{job_id}] Face detected on attempt {attempt + 1}")
-                    break
-                logger.warning(f"[{job_id}] No face detected, retrying...")
-            else:
-                logger.warning(f"[{job_id}] No face after {max_image_attempts} attempts, proceeding anyway")
+            synced_path = os.path.join(work_dir, "synced.mp4")
+            sync_lips(animated_path, audio_path, synced_path)
+            unload_musetalk()
+            logger.info(f"[{job_id}] MuseTalk done")
 
-            unload_flux()
-            logger.info(f"[{job_id}] Image gen done")
-
-            # ── Stage 3: Wan2.1 Image-to-Video ──
-            logger.info(f"[{job_id}] Stage 3/6: Wan2.1 I2V animation")
-            from wan_i2v import generate_video_from_image, unload_wan
-            from shot_prompts import get_video_prompt
-
-            video_prompt = get_video_prompt(shot_type)
-            i2v_video_path = os.path.join(work_dir, "i2v_output.mp4")
-            generate_video_from_image(
-                image_path=product_image_path,
-                output_path=i2v_video_path,
-                prompt=video_prompt,
-            )
-            unload_wan()
-            logger.info(f"[{job_id}] I2V done")
-
-            # ── Stage 4: Face swap ──
-            logger.info(f"[{job_id}] Stage 4/6: InsightFace face swap")
-            from face_swap import swap_face_in_video, unload_face_models
-
-            swapped_video_path = os.path.join(work_dir, "swapped.mp4")
-            swap_face_in_video(
-                video_path=i2v_video_path,
-                ref_face_path=REF_IMAGE,
-                output_path=swapped_video_path,
-            )
-            unload_face_models()
-            logger.info(f"[{job_id}] Face swap done")
-
-            # ── Stage 5: Lip sync ──
-            logger.info(f"[{job_id}] Stage 5/6: Wav2Lip lip sync")
-            from lip_sync import sync_lips
-
-            synced_video_path = os.path.join(work_dir, "synced.mp4")
-            sync_lips(
-                video_path=swapped_video_path,
-                audio_path=audio_path,
-                output_path=synced_video_path,
-            )
-            logger.info(f"[{job_id}] Lip sync done")
-
-            # ── Stage 6: FFmpeg encode to 9:16 ──
-            logger.info(f"[{job_id}] Stage 6/6: FFmpeg encode")
+            # ── FFmpeg encode to 9:16 ──
+            logger.info(f"[{job_id}] FFmpeg: encoding final video")
             final_video_path = os.path.join(work_dir, "final.mp4")
             subprocess.run(
                 [
                     "ffmpeg", "-y",
-                    "-i", synced_video_path,
-                    "-i", audio_path,
-                    "-map", "0:v",
-                    "-map", "1:a",
+                    "-i", synced_path,
                     "-vf", "crop=ih*9/16:ih,scale=1080:1920",
                     "-c:v", "libx264",
                     "-preset", "fast",
@@ -272,12 +207,8 @@ def run_pipeline(job_id: str, job_input: dict):
                 "duration_ms": duration_ms,
                 "metadata": {
                     "tts_model": "f5-tts",
-                    "image_model": "flux-schnell",
-                    "video_model": "wan2.1-i2v",
-                    "face_swap": "insightface",
-                    "lip_sync": "wav2lip",
-                    "pipeline": "product_review",
-                    "shot_type": shot_type,
+                    "video_model": "liveportrait+musetalk",
+                    "pipeline": "talking_head_v2",
                     "script_length": len(script),
                     "elapsed_seconds": round(elapsed, 1),
                 },
@@ -301,6 +232,7 @@ async def health():
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
         "vram_gb": round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 1) if torch.cuda.is_available() else 0,
         "active_jobs": sum(1 for j in jobs.values() if j["status"] == "RUNNING"),
+        "pipeline": "liveportrait+musetalk",
     }
 
 
@@ -325,9 +257,6 @@ async def generate(req: GenerateRequest):
 
     job_input = {
         "script": script,
-        "product_photo_url": req.product_photo_url,
-        "product_desc": req.product_desc,
-        "shot_type": req.shot_type,
         "voice_ref_audio_url": req.voice_ref_audio_url,
         "presigned_audio_url": req.presigned_audio_url,
         "presigned_video_url": req.presigned_video_url,
@@ -368,9 +297,10 @@ def preload_models():
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("STORMS SKYREELS V3 — VAST.AI SERVER")
+    print("STORMS LIVEPORTRAIT + MUSETALK — VAST.AI SERVER")
     print(f"Python: {sys.version}")
     print(f"MODEL_CACHE: {MODEL_CACHE}")
+    print("Pipeline: F5-TTS → LivePortrait → MuseTalk → FFmpeg")
     print("=" * 60)
 
     preload_models()

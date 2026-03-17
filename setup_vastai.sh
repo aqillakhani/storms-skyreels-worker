@@ -14,7 +14,7 @@ git clone --branch master https://github.com/aqillakhani/storms-skyreels-worker.
 pip3 install torch==2.6.0 torchaudio==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 
 # Core deps
-pip3 install fastapi==0.115.0 uvicorn pydantic diffusers==0.34.0 transformers==4.53.2 tokenizers==0.21.4 accelerate==1.8.1 huggingface_hub numpy==1.26.4 requests soundfile==0.12.1 omegaconf==2.3.0 ftfy==6.3.1 imageio-ffmpeg==0.5.1 imageio easydict pyloudnorm librosa kornia wget==3.2 sentencepiece av xfuser
+pip3 install fastapi==0.115.0 uvicorn pydantic transformers==4.53.2 tokenizers==0.21.4 accelerate==1.8.1 huggingface_hub numpy==1.26.4 requests soundfile==0.12.1 omegaconf==2.3.0 ftfy==6.3.1 imageio-ffmpeg==0.5.1 imageio easydict pyloudnorm librosa wget==3.2 sentencepiece av
 
 # F5-TTS
 pip3 uninstall -y torchcodec 2>/dev/null || true
@@ -24,12 +24,15 @@ pip3 uninstall -y torchcodec triton 2>/dev/null || true
 # Stubs
 python3 /app/create_stubs.py
 
-# Clone SkyReels V3
-git clone --depth 1 https://github.com/SkyworkAI/SkyReels-V3.git /opt/skyreels-v3 || true
+# LivePortrait
+git clone --depth 1 https://github.com/KwaiVGI/LivePortrait.git /opt/liveportrait || true
+pip3 install -r /opt/liveportrait/requirements.txt
 
-# InsightFace + Wav2Lip
-pip3 install insightface onnxruntime-gpu opencv-python-headless batch-face
-git clone --depth 1 https://github.com/Rudrabha/Wav2Lip.git /opt/Wav2Lip || true
+# MuseTalk v1.5
+git clone --depth 1 https://github.com/TMElyralab/MuseTalk.git /opt/musetalk || true
+pip3 install -U openmim
+mim install mmengine "mmcv>=2.0.1" "mmdet>=3.1.0" "mmpose>=1.1.0"
+pip3 install -r /opt/musetalk/requirements.txt 2>/dev/null || true
 
 echo "DEPS_DONE"
 
@@ -40,8 +43,8 @@ export MODEL_CACHE=/workspace/models
 export HF_HOME=/workspace/models/huggingface
 export HF_HUB_CACHE=/workspace/models/huggingface/hub
 export TMPDIR=/workspace/tmp
-export PYTHONPATH=/opt/skyreels-v3
-mkdir -p /workspace/models /workspace/tmp /workspace/assets/voice
+export PYTHONPATH=/opt/liveportrait:/opt/musetalk
+mkdir -p /workspace/models /workspace/tmp /workspace/assets/voice /workspace/assets/driving
 
 cd /app
 python3 -u server.py
