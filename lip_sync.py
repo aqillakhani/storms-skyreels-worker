@@ -46,6 +46,10 @@ def sync_lips(
         _download_wav2lip_model(checkpoint)
 
     logger.info("Running Wav2Lip lip sync...")
+    # Clean env to avoid PYTHONHASHSEED issues in subprocess
+    clean_env = {k: v for k, v in os.environ.items() if k != "PYTHONHASHSEED"}
+    clean_env["PYTHONHASHSEED"] = "0"
+
     result = subprocess.run(
         [
             "python3", os.path.join(wav2lip_path, "inference.py"),
@@ -60,6 +64,7 @@ def sync_lips(
         text=True,
         timeout=300,
         cwd=wav2lip_path,
+        env=clean_env,
     )
 
     if result.returncode != 0:
