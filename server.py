@@ -154,10 +154,11 @@ def run_pipeline(job_id: str, job_input: dict):
             logger.info(f"[{job_id}] TTS done: {duration_ms}ms")
             torch.cuda.empty_cache()
 
-            # ── Stage 2: Flux image generation ──
+            # ── Stage 2: Flux image generation (with face validation retry) ──
             logger.info(f"[{job_id}] Stage 2/6: Flux image gen (shot={shot_type})")
             from flux_image_gen import generate_product_image, unload_flux
             from shot_prompts import get_image_prompt
+            from face_check import image_has_face
 
             product_photo = os.path.join(work_dir, "product.jpg")
             if product_photo_url:
@@ -168,11 +169,24 @@ def run_pipeline(job_id: str, job_input: dict):
 
             image_prompt = get_image_prompt(shot_type, product_desc)
             product_image_path = os.path.join(work_dir, "product_scene.png")
-            generate_product_image(
-                product_photo_path=product_photo,
-                prompt=image_prompt,
-                output_path=product_image_path,
-            )
+
+            max_image_attempts = 5
+            for attempt in range(max_image_attempts):
+                seed = 42 + attempt * 7
+                logger.info(f"[{job_id}] Image attempt {attempt + 1}/{max_image_attempts} (seed={seed})")
+                generate_product_image(
+                    product_photo_path=product_photo,
+                    prompt=image_prompt,
+                    output_path=product_image_path,
+                    seed=seed,
+                )
+                if image_has_face(product_image_path):
+                    logger.info(f"[{job_id}] Face detected on attempt {attempt + 1}")
+                    break
+                logger.warning(f"[{job_id}] No face detected, retrying...")
+            else:
+                logger.warning(f"[{job_id}] No face after {max_image_attempts} attempts, proceeding anyway")
+
             unload_flux()
             logger.info(f"[{job_id}] Image gen done")
 
