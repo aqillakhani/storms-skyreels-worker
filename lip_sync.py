@@ -76,9 +76,13 @@ def _download_wav2lip_model(checkpoint_path: str):
 
     from huggingface_hub import hf_hub_download
     logger.info("Downloading Wav2Lip GAN model...")
-    hf_hub_download(
-        repo_id="numz/wav2lip_studio",
-        filename="wav2lip_gan.pth",
+    downloaded = hf_hub_download(
+        repo_id="camenduru/Wav2Lip",
+        filename="checkpoints/wav2lip_gan.pth",
         local_dir=os.path.dirname(checkpoint_path),
     )
+    # Move from subdirectory to expected path
+    import shutil
+    if downloaded != checkpoint_path and os.path.exists(downloaded):
+        shutil.move(downloaded, checkpoint_path)
     logger.info(f"Wav2Lip model saved: {checkpoint_path}")
