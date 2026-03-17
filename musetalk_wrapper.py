@@ -133,9 +133,23 @@ def sync_lips(
     with open(cfg_path, "w") as f:
         yaml.dump(inference_cfg, f)
 
+    # Wrapper script patches torch.load for PyTorch 2.6+ (weights_only=True breaks DWPose)
+    wrapper_path = os.path.join(result_dir, "_run_inference.py")
+    inference_script = os.path.join(MUSETALK_DIR, "scripts", "inference.py")
+    with open(wrapper_path, "w") as f:
+        f.write(
+            "import torch, sys\n"
+            "_orig = torch.load\n"
+            "def _patched(*a, **kw):\n"
+            "    kw.setdefault('weights_only', False)\n"
+            "    return _orig(*a, **kw)\n"
+            "torch.load = _patched\n"
+            f"sys.argv[0] = '{inference_script}'\n"
+            f"exec(compile(open('{inference_script}').read(), '{inference_script}', 'exec'))\n"
+        )
+
     cmd = [
-        sys.executable,
-        os.path.join(MUSETALK_DIR, "scripts", "inference.py"),
+        sys.executable, wrapper_path,
         "--inference_config", cfg_path,
         "--result_dir", result_dir,
         "--output_vid_name", output_vid_name,
@@ -147,10 +161,12 @@ def sync_lips(
         "--fps", "25",
     ]
 
-    # Build clean env — sanitize PYTHONHASHSEED which can cause crashes
+    # Build clean env for subprocess
     sub_env = {**os.environ}
     sub_env["PYTHONPATH"] = f"{MUSETALK_DIR}:{sub_env.get('PYTHONPATH', '')}"
-    sub_env.pop("PYTHONHASHSEED", None)  # Let Python use default random seed
+    sub_env.pop("PYTHONHASHSEED", None)  # Avoid invalid hash seed crashes
+    # PyTorch 2.6 defaults weights_only=True which breaks DWPose/mmengine loading
+    sub_env["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
 
     logger.info(f"MuseTalk cmd: {' '.join(cmd)}")
     proc = subprocess.run(
