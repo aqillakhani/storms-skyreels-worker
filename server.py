@@ -168,6 +168,22 @@ def run_pipeline(job_id: str, job_input: dict):
             unload_musetalk()
             logger.info(f"[{job_id}] MuseTalk done")
 
+            # ── Debug: log intermediate file durations ──
+            for label, fpath in [("animated", animated_path), ("synced", synced_path), ("audio", audio_path)]:
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", fpath],
+                    capture_output=True, text=True,
+                )
+                logger.info(f"[{job_id}] {label} duration: {probe.stdout.strip()}s")
+
+            # Save debug copies
+            debug_dir = f"/workspace/debug/{job_id}"
+            os.makedirs(debug_dir, exist_ok=True)
+            import shutil
+            for label, fpath in [("animated.mp4", animated_path), ("synced.mp4", synced_path), ("audio.wav", audio_path)]:
+                shutil.copy2(fpath, os.path.join(debug_dir, label))
+
             # ── FFmpeg encode to 9:16 ──
             logger.info(f"[{job_id}] FFmpeg: encoding final video")
             final_video_path = os.path.join(work_dir, "final.mp4")
@@ -190,6 +206,7 @@ def run_pipeline(job_id: str, job_input: dict):
                 timeout=120,
                 capture_output=True,
             )
+            shutil.copy2(final_video_path, os.path.join(debug_dir, "final.mp4"))
 
             # ── Upload results ──
             if presigned_audio_url:
