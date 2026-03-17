@@ -10,13 +10,12 @@ VRAM: ~4-6GB
 import logging
 import os
 import sys
-import subprocess
 from pathlib import Path
 
 logger = logging.getLogger("storms-worker")
 
 LIVEPORTRAIT_DIR = "/opt/liveportrait"
-LIVEPORTRAIT_WEIGHTS_DIR = "/workspace/models/liveportrait"
+LIVEPORTRAIT_WEIGHTS_DIR = os.path.join(LIVEPORTRAIT_DIR, "pretrained_weights")
 DRIVING_VIDEOS_DIR = "/workspace/assets/driving"
 
 _liveportrait_pipeline = None
@@ -36,6 +35,7 @@ def ensure_liveportrait_models():
 
     from huggingface_hub import snapshot_download
 
+    # LivePortrait expects weights at pretrained_weights/liveportrait/ and pretrained_weights/insightface/
     snapshot_download(
         repo_id="KwaiVGI/LivePortrait",
         local_dir=str(weights_dir),
@@ -61,17 +61,23 @@ def _load_liveportrait():
         sys.path.insert(0, LIVEPORTRAIT_DIR)
 
     from src.config.inference_config import InferenceConfig
+    from src.config.crop_config import CropConfig
     from src.live_portrait_pipeline import LivePortraitPipeline
 
     inference_cfg = InferenceConfig(
         flag_pasteback=True,
         flag_do_crop=True,
         flag_do_rot=True,
+        flag_stitching=True,
+        flag_relative_motion=True,
+        driving_option="expression-friendly",
     )
+
+    crop_cfg = CropConfig()
 
     _liveportrait_pipeline = LivePortraitPipeline(
         inference_cfg=inference_cfg,
-        crop_cfg=None,
+        crop_cfg=crop_cfg,
     )
 
     logger.info("LivePortrait pipeline loaded")
@@ -127,13 +133,28 @@ def animate_portrait(
 
     pipeline = _load_liveportrait()
 
-    # Run inference
+    # Build ArgumentConfig for the execute method
+    if LIVEPORTRAIT_DIR not in sys.path:
+        sys.path.insert(0, LIVEPORTRAIT_DIR)
+    from src.config.argument_config import ArgumentConfig
+
     output_dir = str(Path(output_path).parent)
-    pipeline.execute(
-        input_source_path=ref_image_path,
-        input_driving_path=driving_video_path,
+
+    args = ArgumentConfig(
+        source=ref_image_path,
+        driving=driving_video_path,
         output_dir=output_dir,
+        flag_pasteback=True,
+        flag_do_crop=True,
+        flag_do_rot=True,
+        flag_stitching=True,
+        flag_relative_motion=True,
+        flag_crop_driving_video=True,
+        driving_option="expression-friendly",
     )
+
+    # Run inference
+    pipeline.execute(args)
 
     # LivePortrait outputs to a default filename in output_dir —
     # find and rename to our expected output path
@@ -149,7 +170,7 @@ def animate_portrait(
 
     latest = generated_files[0]
     if str(latest) != output_path:
-        latest.rename(output_path)
+        os.replace(str(latest), output_path)
 
     logger.info(f"LivePortrait done: {output_path}")
     return output_path
