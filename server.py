@@ -61,6 +61,9 @@ app = FastAPI(title="Storms SkyReels V3", version="1.0.0")
 
 class GenerateRequest(BaseModel):
     script: str
+    product_photo_url: Optional[str] = None
+    product_desc: Optional[str] = None
+    shot_type: str = "general_review"
     voice_ref_audio_url: Optional[str] = None
     presigned_audio_url: Optional[str] = None
     presigned_video_url: Optional[str] = None
@@ -109,18 +112,27 @@ def upload_to_presigned_url(file_path: str, presigned_url: str, content_type: st
 # ── Pipeline Worker ──
 
 def run_pipeline(job_id: str, job_input: dict):
-    """Run the full TTS + video pipeline in a background thread."""
+    """Run the full product review pipeline in a background thread.
+
+    Stages: F5-TTS → Flux (image) → Wan2.1 I2V (video) → InsightFace (face swap) → Wav2Lip (lip sync) → FFmpeg
+    """
     jobs[job_id]["status"] = "RUNNING"
     jobs[job_id]["started_at"] = time.time()
 
     script = job_input["script"]
+    product_photo_url = job_input.get("product_photo_url")
+    product_desc = job_input.get("product_desc", "the product")
+    shot_type = job_input.get("shot_type", "general_review")
     voice_ref_url = job_input.get("voice_ref_audio_url")
     presigned_audio_url = job_input.get("presigned_audio_url")
     presigned_video_url = job_input.get("presigned_video_url")
 
-    with tempfile.TemporaryDirectory(prefix="skyreels_") as work_dir:
+    with tempfile.TemporaryDirectory(prefix="storms_") as work_dir:
         try:
-            # 1. Prepare reference audio
+            import torch
+
+            # ── Stage 1: F5-TTS voice clone ──
+            logger.info(f"[{job_id}] Stage 1/6: TTS ({len(script)} chars)")
             if voice_ref_url:
                 ref_audio = os.path.join(work_dir, "ref_audio.wav")
                 download_file(voice_ref_url, ref_audio)
@@ -129,43 +141,91 @@ def run_pipeline(job_id: str, job_input: dict):
             else:
                 raise RuntimeError("No voice reference audio available")
 
-            # 2. TTS (F5-TTS)
-            logger.info(f"[{job_id}] Generating TTS for {len(script)} chars...")
             from f5_tts_wrapper import generate_tts_f5
-
             ref_text = ""
             if DEFAULT_REF_TEXT_PATH.exists():
                 ref_text = DEFAULT_REF_TEXT_PATH.read_text().strip()
             audio_path = os.path.join(work_dir, "tts_output.wav")
             generate_tts_f5(script, ref_audio, audio_path, ref_text=ref_text)
 
-            import torch
             import soundfile as sf
             audio_data, sample_rate = sf.read(audio_path)
             duration_ms = int(len(audio_data) / sample_rate * 1000)
-            logger.info(f"[{job_id}] TTS audio: {duration_ms}ms @ {sample_rate}Hz")
+            logger.info(f"[{job_id}] TTS done: {duration_ms}ms")
             torch.cuda.empty_cache()
 
-            # 3. SkyReels V3 video generation
-            from skyreels_inference import generate_skyreels_video
+            # ── Stage 2: Flux image generation ──
+            logger.info(f"[{job_id}] Stage 2/6: Flux image gen (shot={shot_type})")
+            from flux_image_gen import generate_product_image, unload_flux
+            from shot_prompts import get_image_prompt
 
-            logger.info(f"[{job_id}] Generating talking avatar video...")
-            raw_video_path = os.path.join(work_dir, "skyreels_out.mp4")
-            generate_skyreels_video(
-                audio_path=audio_path,
-                ref_image_path=REF_IMAGE,
-                output_path=raw_video_path,
-                prompt="A beautiful young woman speaking to camera with confident expression and natural gestures.",
-                resolution="480P",
+            product_photo = os.path.join(work_dir, "product.jpg")
+            if product_photo_url:
+                download_file(product_photo_url, product_photo)
+            else:
+                # No product photo — use a placeholder prompt
+                product_photo = REF_IMAGE
+
+            image_prompt = get_image_prompt(shot_type, product_desc)
+            product_image_path = os.path.join(work_dir, "product_scene.png")
+            generate_product_image(
+                product_photo_path=product_photo,
+                prompt=image_prompt,
+                output_path=product_image_path,
             )
-            torch.cuda.empty_cache()
+            unload_flux()
+            logger.info(f"[{job_id}] Image gen done")
 
-            # 4. Re-encode to vertical 9:16 H.264
-            browser_video_path = os.path.join(work_dir, "final.mp4")
+            # ── Stage 3: Wan2.1 Image-to-Video ──
+            logger.info(f"[{job_id}] Stage 3/6: Wan2.1 I2V animation")
+            from wan_i2v import generate_video_from_image, unload_wan
+            from shot_prompts import get_video_prompt
+
+            video_prompt = get_video_prompt(shot_type)
+            i2v_video_path = os.path.join(work_dir, "i2v_output.mp4")
+            generate_video_from_image(
+                image_path=product_image_path,
+                output_path=i2v_video_path,
+                prompt=video_prompt,
+            )
+            unload_wan()
+            logger.info(f"[{job_id}] I2V done")
+
+            # ── Stage 4: Face swap ──
+            logger.info(f"[{job_id}] Stage 4/6: InsightFace face swap")
+            from face_swap import swap_face_in_video, unload_face_models
+
+            swapped_video_path = os.path.join(work_dir, "swapped.mp4")
+            swap_face_in_video(
+                video_path=i2v_video_path,
+                ref_face_path=REF_IMAGE,
+                output_path=swapped_video_path,
+            )
+            unload_face_models()
+            logger.info(f"[{job_id}] Face swap done")
+
+            # ── Stage 5: Lip sync ──
+            logger.info(f"[{job_id}] Stage 5/6: Wav2Lip lip sync")
+            from lip_sync import sync_lips
+
+            synced_video_path = os.path.join(work_dir, "synced.mp4")
+            sync_lips(
+                video_path=swapped_video_path,
+                audio_path=audio_path,
+                output_path=synced_video_path,
+            )
+            logger.info(f"[{job_id}] Lip sync done")
+
+            # ── Stage 6: FFmpeg encode to 9:16 ──
+            logger.info(f"[{job_id}] Stage 6/6: FFmpeg encode")
+            final_video_path = os.path.join(work_dir, "final.mp4")
             subprocess.run(
                 [
                     "ffmpeg", "-y",
-                    "-i", raw_video_path,
+                    "-i", synced_video_path,
+                    "-i", audio_path,
+                    "-map", "0:v",
+                    "-map", "1:a",
                     "-vf", "crop=ih*9/16:ih,scale=1080:1920",
                     "-c:v", "libx264",
                     "-preset", "fast",
@@ -173,19 +233,20 @@ def run_pipeline(job_id: str, job_input: dict):
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
                     "-b:a", "192k",
+                    "-shortest",
                     "-movflags", "+faststart",
-                    browser_video_path,
+                    final_video_path,
                 ],
                 check=True,
                 timeout=120,
                 capture_output=True,
             )
 
-            # 5. Upload results
+            # ── Upload results ──
             if presigned_audio_url:
                 upload_to_presigned_url(audio_path, presigned_audio_url, "audio/wav")
             if presigned_video_url:
-                upload_to_presigned_url(browser_video_path, presigned_video_url, "video/mp4")
+                upload_to_presigned_url(final_video_path, presigned_video_url, "video/mp4")
 
             elapsed = time.time() - jobs[job_id]["started_at"]
             logger.info(f"[{job_id}] Pipeline complete in {elapsed:.1f}s")
@@ -197,9 +258,12 @@ def run_pipeline(job_id: str, job_input: dict):
                 "duration_ms": duration_ms,
                 "metadata": {
                     "tts_model": "f5-tts",
-                    "video_model": "skyreels_v3",
-                    "pipeline": "skyreels",
-                    "num_frames": int(duration_ms / 1000 * 25),
+                    "image_model": "flux-schnell",
+                    "video_model": "wan2.1-i2v",
+                    "face_swap": "insightface",
+                    "lip_sync": "wav2lip",
+                    "pipeline": "product_review",
+                    "shot_type": shot_type,
                     "script_length": len(script),
                     "elapsed_seconds": round(elapsed, 1),
                 },
@@ -247,6 +311,9 @@ async def generate(req: GenerateRequest):
 
     job_input = {
         "script": script,
+        "product_photo_url": req.product_photo_url,
+        "product_desc": req.product_desc,
+        "shot_type": req.shot_type,
         "voice_ref_audio_url": req.voice_ref_audio_url,
         "presigned_audio_url": req.presigned_audio_url,
         "presigned_video_url": req.presigned_video_url,
@@ -275,16 +342,8 @@ async def status(job_id: str):
 # ── Pre-load models at startup ──
 
 def preload_models():
-    """Pre-load heavy ML models so first request is fast."""
-    logger.info("Pre-loading models at startup...")
-    try:
-        from skyreels_inference import ensure_skyreels_models, _load_pipeline
-        ensure_skyreels_models()
-        _load_pipeline()
-        logger.info("SkyReels V3 pipeline pre-loaded")
-    except Exception as e:
-        logger.error(f"Failed to pre-load SkyReels V3: {e}", exc_info=True)
-
+    """Pre-load F5-TTS at startup (other models loaded on-demand and unloaded between stages)."""
+    logger.info("Pre-loading F5-TTS at startup...")
     try:
         from f5_tts_wrapper import _load_f5_model
         _load_f5_model()

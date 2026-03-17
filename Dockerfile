@@ -69,11 +69,23 @@ ENV HF_HOME="/workspace/models/huggingface"
 ENV HF_HUB_CACHE="/workspace/models/huggingface/hub"
 ENV TMPDIR="/workspace/tmp"
 
+# InsightFace for face swap
+RUN pip install --no-cache-dir insightface onnxruntime-gpu
+
+# Wav2Lip
+RUN git clone --depth 1 https://github.com/Rudrabha/Wav2Lip.git /opt/Wav2Lip
+RUN pip install --no-cache-dir opencv-python-headless batch-face
+
 # Copy worker files
 COPY server.py .
 COPY skyreels_inference.py .
 COPY f5_tts_wrapper.py .
 COPY ashley_reference.png .
+COPY flux_image_gen.py .
+COPY wan_i2v.py .
+COPY face_swap.py .
+COPY lip_sync.py .
+COPY shot_prompts.py .
 
 EXPOSE 8000
 
