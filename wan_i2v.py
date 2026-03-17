@@ -34,7 +34,7 @@ def ensure_wan_models() -> str:
 
     logger.info("Ensuring Wan2.1 I2V model is downloaded...")
     _model_path = snapshot_download(
-        repo_id="Wan-AI/Wan2.1-I2V-14B-720P",
+        repo_id="Wan-AI/Wan2.1-I2V-14B-720P-Diffusers",
         cache_dir=cache_dir,
     )
     logger.info(f"Wan2.1 I2V model ready at: {_model_path}")
